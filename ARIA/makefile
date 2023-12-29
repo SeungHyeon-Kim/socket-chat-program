@@ -11,7 +11,7 @@ SRCS := $(filter-out $(addprefix $(SRC_DIR)/,$(EXCLUDED_SRCS)), $(wildcard $(SRC
 OBJS := $(patsubst $(SRC_DIR)/%.cpp, $(OBJ_DIR)/%.o, $(SRCS))
 
 # Executable
-TARGET := $(BIN_DIR)/main
+TARGET := $(BIN_DIR)/test
 
 # Build executable
 $(TARGET): $(OBJS)

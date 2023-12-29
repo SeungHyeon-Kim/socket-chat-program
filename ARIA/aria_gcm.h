@@ -3,25 +3,31 @@
 
 #include "aria.h"
 
+/*
+    The bit size of nonce, when initializing the CTR-0
+     - 8 ~ 128
+*/
+#define NONCE_BITS     128
 
-// When executing Encrypt or Decrypt function, set whether to use a thread.
-// 0:   a single thread (default)
-// 2~:  using multi-thread when it's more than {numBlocks} blocks
-#define USING_THREAD 16
+/*
+    Using thread
+     - 0: single
+     - 1: multi-thread
+*/
+#define USING_THREAD    0
 
-#if USING_THREAD > 1
+#if USING_THREAD
 #include <thread>
 #endif
 
 class ARIA_GCM : public ARIA {
     private:
     uint8_t ctr[ARIA_BLOCK_SIZE]{};
-    uint8_t H[ARIA_BLOCK_SIZE]{};
-    uint8_t Y[ARIA_BLOCK_SIZE]{};
+    uint8_t h[ARIA_BLOCK_SIZE]{};
+    uint8_t y[ARIA_BLOCK_SIZE]{};
 
-    void counter_inc(uint8_t *ctr, const int n) noexcept;
     void counter_enc(const uint8_t *in, const int num_block, const int remains, const int offset, uint8_t *out) noexcept;
-    void mul(uint8_t *x, const uint8_t *y) noexcept;
+    void mul_h(uint8_t *x) noexcept;
     void ghash(const uint8_t *src, const int num_block, const uint8_t *prev, uint8_t *dst) noexcept;
     
     public:
@@ -31,7 +37,7 @@ class ARIA_GCM : public ARIA {
      * \param iv        iv
      * \param iv_size   byte size of iv
     */
-    void init(const uint8_t *key, const uint8_t *iv, const int iv_size);
+    void init(const uint8_t *key, const uint8_t *nonce);
     
     /**
      * \brief           Authenticated encryption with associated data.
