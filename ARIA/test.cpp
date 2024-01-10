@@ -34,8 +34,6 @@ int main(int argc, char **argv) {
 
     ARIA_GCM aria;
     aria.init(k, i);
-
-    dump_bytes(p, 128); printf("\n");
     
     aria.auth_enc(p, 128, a, 128, 13, temp_c, temp_t);
     if (!std::memcmp(temp_c, c, 128)) {

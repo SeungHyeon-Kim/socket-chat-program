@@ -92,19 +92,27 @@ void ARIA_GCM::mul_h(uint8_t *x) noexcept {
     std::memcpy(x, z, 16);
 }
 
-void ARIA_GCM::ghash(const uint8_t *src, const int num_block, const uint8_t *prev, uint8_t *dst) noexcept {
-    int i, j;
+void ARIA_GCM::ghash(const uint8_t *src, const int len_src, const uint8_t *prev, uint8_t *dst) noexcept {
+    int i, n = len_src;
     uint8_t temp[16]{0};
 
     if (prev) {
         std::memcpy(temp, prev, 16);
     }
 
-    for (i = 0; i < num_block; i++) {
-        for (j = 0; j < 16; j++) {
-            temp[j] ^= src[(16*i) + j];
-        }
+    while (n > 15) {
+        xor128(temp, src);
+        mul_h(temp);
         
+        src += 16;
+        n   -= 16;
+    }
+
+    if (n > 0) {
+        for (i = 0; i < n; i++) {
+            temp[i] ^= src[i];
+        }
+
         mul_h(temp);
     }
     
@@ -128,7 +136,7 @@ void ARIA_GCM::init(const uint8_t *key, const uint8_t *nonce) {
     #elif (NONCE_BITS > 7 && NONCE_BITS < 129 && (NONCE_BITS % 8) == 0)
     std::memcpy(temp, nonce, (NONCE_BITS / 8));
     temp[31] = NONCE_BITS;
-    ghash(temp, 2, nullptr, ctr);
+    ghash(temp, 32, nullptr, ctr);
     #else
     return;
     #endif
@@ -137,8 +145,7 @@ void ARIA_GCM::init(const uint8_t *key, const uint8_t *nonce) {
 }
 
 void ARIA_GCM::auth_enc(const uint8_t *p, const int p_size, const uint8_t *ad, const int ad_size, const int tag_size, uint8_t *c, uint8_t *tag) {
-    int  p_numblocks =  p_size / 16,  p_remains =  p_size % 16,
-        ad_numblocks = ad_size / 16, ad_remains = ad_size % 16;
+    int p_numblocks =  p_size / 16,  p_remains =  p_size % 16;
     int64_t p_bit64 = (int64_t)p_size * 8, ad_bit64 = (int64_t)ad_size * 8;
     uint8_t len[16], temp1[16], temp2[16];
 
@@ -153,6 +160,7 @@ void ARIA_GCM::auth_enc(const uint8_t *p, const int p_size, const uint8_t *ad, c
          if USING_THREAD is greater than 1, two threads will be allocated for encryption.
     */
 #if (USING_THREAD)
+    int ad_numblocks = ad_size / 16, ad_remains = ad_size % 16;
     std::thread thds[2];
 
     if (p_numblocks >= 32) {
@@ -162,27 +170,21 @@ void ARIA_GCM::auth_enc(const uint8_t *p, const int p_size, const uint8_t *ad, c
         counter_enc(p, p_numblocks, p_remains, 0, c);
     }
 
-    if (ad_remains) { ad_numblocks++; }
-    if (p_remains) { p_numblocks++; }
-
-    ghash(ad, ad_numblocks, nullptr, temp1);
+    ghash(ad, ad_size, nullptr, temp1);
     
     if (thds[0].joinable() && thds[1].joinable()) {
         thds[0].join(); thds[1].join();
     }
 
-    ghash(c, p_numblocks, temp1, temp2);
-    ghash(len, 1, temp2, temp1);
+    ghash(c, p_size, temp1, temp2);
+    ghash(len, 16, temp2, temp1);
 #else
     // a single thread
     counter_enc(p, p_numblocks, p_remains, 0, c);
 
-    if (ad_remains) { ad_numblocks++; }
-    if (p_remains) { p_numblocks++; }
-
-    ghash(ad, ad_numblocks, nullptr, temp1);
-    ghash(c, p_numblocks, temp1, temp2);
-    ghash(len, 1, temp2, temp1);
+    ghash(ad, ad_size, nullptr, temp1);
+    ghash(c, p_size, temp1, temp2);
+    ghash(len, 16, temp2, temp1);
 #endif
 
     // Tag
@@ -192,8 +194,7 @@ void ARIA_GCM::auth_enc(const uint8_t *p, const int p_size, const uint8_t *ad, c
 }
 
 bool ARIA_GCM::auth_dec(const uint8_t *c, const int c_size, const uint8_t *ad, const int ad_size, const uint8_t *tag, const int tag_size, uint8_t *p) {
-    int  c_numblocks =  c_size / 16,  c_remains =  c_size % 16,
-        ad_numblocks = ad_size / 16, ad_remains = ad_size % 16;
+    int c_numblocks =  c_size / 16,  c_remains =  c_size % 16;
     int64_t c_bit64 = (int64_t)c_size * 8, ad_bit64 = (int64_t)ad_size * 8;
     uint8_t len[16], temp1[16], temp2[16];
 
@@ -204,12 +205,9 @@ bool ARIA_GCM::auth_dec(const uint8_t *c, const int c_size, const uint8_t *ad, c
     }
 
     // GHASH
-    if (ad_remains) { ad_numblocks++; }
-    if (c_remains) { c_numblocks++; }
-
-    ghash(ad, ad_numblocks, nullptr, temp1);
-    ghash(c, c_numblocks, temp1, temp2);
-    ghash(len, 1, temp2, temp1);
+    ghash(ad, ad_size, nullptr, temp1);
+    ghash(c, c_size, temp1, temp2);
+    ghash(len, 16, temp2, temp1);
 
     // Check tag
     for (int i = 0; i < tag_size; i++) { 
@@ -218,8 +216,9 @@ bool ARIA_GCM::auth_dec(const uint8_t *c, const int c_size, const uint8_t *ad, c
         }
     }
 
-    c_numblocks = c_size / 16;
-#if USING_THREAD > 1
+#if (USING_THREAD)
+    int ad_numblocks = ad_size / 16, ad_remains = ad_size % 16;
+
     if (c_numblocks >= USING_THREAD) {
         std::thread thd1(&ARIA_GCM::counter_enc, this, c, (c_numblocks / 2), 0, 0, p);
         std::thread thd2(&ARIA_GCM::counter_enc, this, (c + ((c_numblocks / 2) * 16)), (c_numblocks - (c_numblocks / 2)), c_remains, (c_numblocks / 2), (p + (c_numblocks / 2) * 16));
